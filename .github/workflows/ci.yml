@@ -1,0 +1,23 @@
+# Written but NOT executed in the authoring session (no GitHub Actions access). Mirrors scripts/verify.sh.
+name: ci
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.28.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: conda-incubator/setup-miniconda@v3
+        with: { miniconda-version: latest }
+      - name: System engines
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg pandoc poppler-utils imagemagick xvfb libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-draw
+      - run: scripts/setup.sh
+        shell: bash -el {0}
+      - run: npx playwright install --with-deps chromium
+      - run: conda activate EZ && scripts/verify.sh
+        shell: bash -el {0}

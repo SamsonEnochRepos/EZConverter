@@ -1,0 +1,41 @@
+{
+  "name": "@ezconverter/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "export:web": "expo export --platform web --output-dir dist-web",
+    "e2e": "pnpm export:web && playwright test"
+  },
+  "dependencies": {
+    "@ezconverter/api-client": "workspace:*",
+    "@ezconverter/contracts": "workspace:*",
+    "@ezconverter/shared-domain": "workspace:*",
+    "expo": "58.0.16",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-native": "0.88.0",
+    "react-native-web": "0.21.4",
+    "react-native-safe-area-context": "5.10.1",
+    "expo-document-picker": "58.0.4",
+    "expo-file-system": "58.0.10",
+    "expo-sharing": "58.0.19",
+    "expo-secure-store": "58.0.2",
+    "expo-keep-awake": "58.0.3",
+    "expo-status-bar": "58.0.3",
+    "@expo/metro-runtime": "58.0.14",
+    "@react-native-async-storage/async-storage": "2.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  }
+}

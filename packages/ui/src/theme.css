@@ -1,0 +1,9 @@
+/* Maps the CSS-variable tokens to Tailwind utilities (bg-surface, text-muted, border-line, ...). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+@theme inline {
+  --color-bg: var(--bg); --color-surface: var(--surface); --color-surface2: var(--surface-2); --color-ink: var(--text);
+  --color-muted: var(--muted); --color-line: var(--line); --color-accent: var(--accent); --color-accentink: var(--accent-text);
+  --color-accentsoft: var(--accent-soft); --color-good: var(--good); --color-goodsoft: var(--good-soft); --color-warn: var(--warn);
+  --color-warnsoft: var(--warn-soft); --color-bad: var(--bad); --color-badsoft: var(--bad-soft); --color-info: var(--info); --color-infosoft: var(--info-soft);
+  --radius-card: var(--radius); --shadow-card: var(--shadow); --shadow-glow: var(--glow);
+}

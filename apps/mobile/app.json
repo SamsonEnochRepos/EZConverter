@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "EZConverter",
+    "slug": "ezconverter",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "scheme": "ezconverter",
+    "ios": { "bundleIdentifier": "app.ezconverter.mobile", "supportsTablet": true, "infoPlist": { "ITSAppUsesNonExemptEncryption": false } },
+    "android": { "package": "app.ezconverter.mobile", "allowBackup": false },
+    "web": { "bundler": "metro", "output": "single" },
+    "plugins": ["expo-secure-store", "expo-sharing"]
+  }
+}

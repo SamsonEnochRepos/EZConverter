@@ -1,0 +1,23 @@
+{
+  "name": "ezconverter",
+  "private": true,
+  "version": "0.1.0",
+  "description": "EZConverter monorepo: web, desktop (Electron) and mobile (Expo) clients over a shared contract.",
+  "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "gen:openapi": "node scripts/gen-openapi.mjs",
+    "gen:contracts": "pnpm gen:openapi && pnpm --filter @ezconverter/contracts generate",
+    "check:contracts": "node scripts/check-contracts.mjs",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "build": "pnpm -r --if-present build",
+    "e2e": "pnpm --filter @ezconverter/web e2e"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "esbuild"]
+  }
+}

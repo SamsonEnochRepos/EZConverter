@@ -1,0 +1,25 @@
+# Draft, unverified (no Docker daemon in the authoring session). Terminate TLS in front of this service (Caddy/nginx/cloud LB).
+services:
+  converter:
+    build: { context: ../.., dockerfile: deployment/containers/Dockerfile }
+    environment:
+      EZ_API_KEYS: ${EZ_API_KEYS:?set EZ_API_KEYS (see .env.example)}
+      EZ_ALLOWED_ORIGINS: ${EZ_ALLOWED_ORIGINS:-}
+      EZ_RETENTION_HOURS: ${EZ_RETENTION_HOURS:-24}
+      EZ_MAX_CONCURRENCY: ${EZ_MAX_CONCURRENCY:-2}
+      # Default Docker seccomp blocks user namespaces, so per-worker network isolation is usually unavailable here.
+      # Compensate at the network layer: the `egress-denied` network below has no route out. Use `require` only on hosts that allow unshare.
+      EZ_NETWORK_ISOLATION: auto
+    volumes: [ "converter-data:/data" ]
+    read_only: true
+    tmpfs: [ "/tmp:size=2g,mode=1777" ]
+    cap_drop: [ ALL ]
+    security_opt: [ "no-new-privileges:true" ]
+    pids_limit: 512
+    mem_limit: 8g
+    cpus: 4
+    networks: [ egress-denied ]
+    ports: [ "127.0.0.1:8787:8787" ]
+volumes: { converter-data: {} }
+networks:
+  egress-denied: { internal: true }   # inbound via the published port only; conversion engines cannot reach the internet

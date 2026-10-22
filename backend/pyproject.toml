@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ezconverter"
+version = "0.1.0"
+description = "EZConverter conversion core and API"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "pydantic>=2.7,<3",
+  "pillow>=10.3",
+  "pyyaml>=6.0",
+  "defusedxml>=0.7.1",
+  "pypdf>=5.0",
+]
+
+[project.optional-dependencies]
+sevenzip = ["py7zr>=0.21"]
+dev = ["pytest>=8", "pytest-xdist>=3.5", "httpx>=0.27", "ruff>=0.5", "python-pptx>=0.6", "openpyxl>=3.1"]
+
+[tool.setuptools.package-data]
+ezconverter = ["engines/data/*.lua", "registry/*.json"]
+
+[tool.setuptools.packages.find]
+include = ["ezconverter*"]
+
+[tool.pytest.ini_options]
+testpaths = ["../tests"]
+pythonpath = ["."]
+markers = [
+  "conformance: runs real conversion engines against generated fixtures",
+  "security: security-boundary tests",
+]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["../apps", "../packages", "../node_modules"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "W"]
+ignore = ["UP042", "SIM115", "B905", "B008", "SIM105", "SIM108", "UP045", "UP007", "B904", "SIM117"]   # FastAPI Depends defaults; style choices
+
+[tool.ruff.lint.per-file-ignores]
+"../tests/**" = ["E402", "E701", "E702", "B011", "SIM", "E731", "E741", "B017", "B018"]
+"../scripts/**" = ["E402"]
+
+[project.scripts]
+ezconverter = "ezconverter.__main__:main"

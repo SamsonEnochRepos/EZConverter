@@ -1,0 +1,54 @@
+/* Design tokens. Light by default, dark by OS preference, with an explicit override via [data-theme]. */
+:root {
+  --bg: #f1f5fc; --surface: #ffffff; --surface-2: #f2f5fb; --text: #0b1530; --muted: #56627f; --line: #e1e7f2;
+  --accent: #0b57e3; --accent-text: #ffffff; --accent-soft: #e6eeff;
+  --good: #0f7a3d; --good-soft: #ddf6e6; --warn: #8a4b05; --warn-soft: #fff1d6; --bad: #b42318; --bad-soft: #fee4e2; --info: #0b57e3; --info-soft: #e6eeff;
+  --hero: linear-gradient(140deg, #0a4fd6 0%, #1f5df0 55%, #3b6ff5 100%);
+  --radius: 22px; --shadow: 0 1px 2px rgb(11 21 48 / 5%), 0 10px 30px rgb(11 87 227 / 7%);
+  --glow: 0 8px 22px rgb(11 87 227 / 32%);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #060d1f; --surface: #0f1a33; --surface-2: #16233f; --text: #e8eefb; --muted: #9db0d3; --line: #22325a;
+    --accent: #6b97ff; --accent-text: #06112b; --accent-soft: #14285a;
+    --good: #6ee7a0; --good-soft: #12301f; --warn: #fbbf6a; --warn-soft: #382a10; --bad: #fca5a5; --bad-soft: #3b1618; --info: #93b4fb; --info-soft: #14285a;
+    --hero: linear-gradient(140deg, #0a3bb8 0%, #1650d8 55%, #2a63ea 100%);
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 30px rgb(0 0 0 / 28%); --glow: 0 8px 22px rgb(107 151 255 / 22%);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #060d1f; --surface: #0f1a33; --surface-2: #16233f; --text: #e8eefb; --muted: #9db0d3; --line: #22325a;
+  --accent: #6b97ff; --accent-text: #06112b; --accent-soft: #14285a;
+  --good: #6ee7a0; --good-soft: #12301f; --warn: #fbbf6a; --warn-soft: #382a10; --bad: #fca5a5; --bad-soft: #3b1618; --info: #93b4fb; --info-soft: #14285a;
+  --hero: linear-gradient(140deg, #0a3bb8 0%, #1650d8 55%, #2a63ea 100%);
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 30px rgb(0 0 0 / 28%); --glow: 0 8px 22px rgb(107 151 255 / 22%);
+}
+html { font-size: 100%; }
+html[data-large-text="true"] { font-size: 118%; }
+html[data-reduce-motion="true"] *, html[data-reduce-motion="true"] *::before, html[data-reduce-motion="true"] *::after {
+  animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important;
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
+body { background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+
+/* Headline accent: a single italic serif word inside a sans headline. */
+.ez-serif { font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-style: italic; font-weight: 500; letter-spacing: -0.01em; }
+
+/* Native selects, restyled: pill shape and our own chevron. */
+.ez-select { appearance: none; -webkit-appearance: none; padding-right: 2.5rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238090b3' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 0.85rem center; background-size: 1.15rem; }
+
+/* Hero decoration: soft concentric rings echo the audio-wave motif without adding assets. */
+.ez-hero { position: relative; overflow: hidden; isolation: isolate; }
+.ez-hero::before, .ez-hero::after { content: ""; position: absolute; z-index: -1; border-radius: 9999px; pointer-events: none; }
+.ez-hero::before { width: 26rem; height: 26rem; right: -9rem; top: -11rem; background: radial-gradient(closest-side, rgb(255 255 255 / 20%), rgb(255 255 255 / 0%)); }
+.ez-hero::after { width: 17rem; height: 17rem; left: -6rem; bottom: -9rem; background: radial-gradient(closest-side, rgb(255 255 255 / 13%), rgb(255 255 255 / 0%)); }
+
+@keyframes ez-indeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
+.ez-indeterminate { animation: ez-indeterminate 1.4s ease-in-out infinite; }
+@keyframes ez-spin { to { transform: rotate(360deg); } }
+.ez-spin { transform-origin: 50% 50%; animation: ez-spin 1.1s linear infinite; }
+@keyframes ez-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.ez-rise { animation: ez-rise 0.28s ease-out both; }

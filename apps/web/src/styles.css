@@ -1,0 +1,4 @@
+@import "tailwindcss";
+@import "@ezconverter/ui/styles.css";
+@import "@ezconverter/ui/theme.css";
+@source "../../../packages/ui/src";

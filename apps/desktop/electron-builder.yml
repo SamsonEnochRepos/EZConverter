@@ -1,0 +1,20 @@
+appId: app.ezconverter.desktop
+productName: EZConverter
+directories: { output: release }
+files: ["dist/**", "package.json"]
+extraResources:
+  - { from: "../web/dist", to: "web" }
+  # The converter sidecar (PyInstaller bundle of backend/ + engines) is copied here by CI; see docs/operations/packaging.md.
+  - { from: "sidecar", to: "sidecar", filter: ["**/*"] }
+asar: true
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false
+mac: { category: public.app-category.productivity, hardenedRuntime: true, target: [dmg, zip] }
+win: { target: [nsis, zip] }
+linux: { target: [AppImage, deb], category: Utility }

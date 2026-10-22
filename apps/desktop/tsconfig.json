@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "module": "ESNext", "types": ["node"], "lib": ["ES2023", "DOM"], "jsx": "preserve" },
+  "include": ["src", "test", "e2e", "playwright.config.ts"]
+}
