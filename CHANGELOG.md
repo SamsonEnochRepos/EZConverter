@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Android release build: signed APK through a config plugin (`apps/mobile/plugins/with-release-hardening.js`) that also restricts cleartext traffic to loopback;
   unneeded permissions are blocked; app icon and adaptive icon.
 - Windows sandbox: workers run in a Job Object (memory, CPU-time and process-count limits, UI restrictions, whole-tree kill, fail-closed) with tests in `tests/security/test_windows_job.py`.
+- Windows Job Object also blocks handles to other processes' windows (`JOB_OBJECT_UILIMIT_HANDLES`), with a test that probes a message to the shell window.
 - Packaged builds can run workers through the converter executable itself (`worker` command) and find bundled engines via `EZ_ENGINE_DIR`.
 - App icon (Windows installer, Android launcher and adaptive icon, web favicon) and a `.dockerignore`; the production Dockerfile is now built and exercised.
 - `apps/desktop/e2e/packaged.spec.ts`: e2e for the packaged Windows app over Chromium's remote-debugging port (the release build disables `--inspect`); run with `EZ_DESKTOP_EXE`.
@@ -40,6 +41,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - `docs/STATUS.md` now describes the real state of the Windows, Android and Docker builds instead of "never built".
+- `docs/security/RELEASE_AUDIT.md` records that the old project archive is already in the public git history and lists the Windows handle-restriction finding.
 - `docs/security/RELEASE_AUDIT.md` and `docs/STATUS.md` record the packaged-app e2e outcome: conversions pass, the "quitting stops the converter" test timed out and is unresolved.
 - Package metadata (`pyproject.toml`, every `package.json`) now declares `Apache-2.0` and the creator instead of "Proprietary"; the README was rewritten (the old one ended in corrupted UTF-16 text).
 - Reviewed SQL builders in `orchestration/store.py` carry `# nosec B608` with the reason; Bandit reports 0 medium/high findings.

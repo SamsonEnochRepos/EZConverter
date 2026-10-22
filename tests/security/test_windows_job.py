@@ -68,3 +68,25 @@ def test_worker_environment_is_scrubbed(tmp_path, monkeypatch):
     r = run_process(_py("import os; print(sorted(os.environ))"), workdir=tmp_path)
     assert "supersecret" not in r.stdout and "EZ_API_KEYS" not in r.stdout and "AWS_SECRET_ACCESS_KEY" not in r.stdout
 
+
+_SEND_TO_FOREIGN_WINDOW = """
+import ctypes, sys
+u = ctypes.windll.user32
+hwnd = u.FindWindowW('Shell_TrayWnd', None) or u.GetShellWindow()
+if not hwnd:
+    print('no-foreign-window')
+    sys.exit(0)
+res = ctypes.c_size_t(0)
+ok = u.SendMessageTimeoutW(hwnd, 0, 0, 0, 2, 1000, ctypes.byref(res))
+print('delivered' if ok else 'blocked')
+"""
+
+
+def test_worker_cannot_message_windows_of_other_processes(tmp_path):
+    r = run_process(_py(_SEND_TO_FOREIGN_WINDOW), workdir=tmp_path)
+    if "no-foreign-window" in r.stdout:
+        pytest.skip("no shell window in this session to probe")
+    assert r.stdout.strip() == "blocked", r.stdout + r.stderr_tail
+    # the same probe without confinement does reach the window, so the check above is meaningful
+    free = run_process(_py(_SEND_TO_FOREIGN_WINDOW), workdir=tmp_path, sandboxed=False)
+    assert free.stdout.strip() == "delivered", free.stdout

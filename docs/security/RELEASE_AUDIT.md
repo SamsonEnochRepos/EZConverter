@@ -8,8 +8,8 @@ Statements below say "passed" only for things that were actually run; everything
 
 | File | Size | SHA-256 |
 |---|---|---|
-| `EZConverter-Setup-0.1.0-win-x64.exe` | 232 MiB | `8fb2cc8482fa7ecaccfff4d8d4790521b8f5f49b31961fa445abe6de071e9852` |
-| `EZConverter-0.1.0-win-x64-portable.zip` | 317 MiB | `fc3a6668194df014a42b5061ac66ea3387434f6c79c14e94d82bcf0d76961f79` |
+| `EZConverter-Setup-0.1.0-win-x64.exe` | 232 MiB | `556c1ec260132d167fb40ac2aec7bb217ac5a2dd320f046b23fe42a4660b996a` |
+| `EZConverter-0.1.0-win-x64-portable.zip` | 317 MiB | `fa3f4683c3468d9203bc782f4998326c73675c39b8af442568d72ae991f902c3` |
 | `EZConverter-0.1.0-android.apk` | 49 MiB | `e5666738926151fb59ff7b4ae87a747e4677873b66888cb8dff9a87a8b7fe3be` |
 
 Android signing certificate (SHA-256): `9C:80:36:4A:DE:EA:21:77:82:DE:E9:ED:B1:66:FC:68:D0:36:E2:F4:3C:3C:C6:4C:34:5F:B1:6C:2A:C6:07:45`
@@ -22,7 +22,7 @@ Android signing certificate (SHA-256): `9C:80:36:4A:DE:EA:21:77:82:DE:E9:ED:B1:6
 | Python lint (`ruff`) | Windows and Linux | Pass |
 | Python unit + integration + security tests | Linux (Ubuntu 24.04 container, default seccomp) | **182 passed, 8 skipped, 0 failed.** Skips: 6 Windows-only Job Object tests, 2 that need network namespaces (unavailable in a default container) |
 | Conformance: every advertised capability converted from a real input with the real engine, output checked independently | Linux, single pass | **321 / 321 passed** |
-| Windows sandbox tests (`test_windows_job.py`) | Windows 10 | 6 passed; the memory and CPU cases were confirmed to **fail** when the confinement is switched off |
+| Windows sandbox tests (`test_windows_job.py`) | Windows 10 | 7 passed; the memory, CPU and window-message cases were confirmed to **fail** (or be bypassed) when the confinement is switched off |
 | TypeScript typecheck | Windows, all workspace packages | Pass |
 | TypeScript tests | Windows | 78 passed: ui 12, web 3, mobile 7, desktop 21, api-client 6, shared-domain 29 (two shared-domain cases need an FFmpeg with libvpx; they pass with the bundled FFmpeg) |
 | Web e2e (real Chromium, real backend) | Windows | 6 passed, 2 failed: both are the "DOCX to PDF" flow and need LibreOffice, which is not installed on the test machine |
@@ -43,11 +43,12 @@ Android signing certificate (SHA-256): `9C:80:36:4A:DE:EA:21:77:82:DE:E9:ED:B1:6
 |---|---|---|---|
 | 1 | **LibreOffice fetched remote resources** (linked images and stylesheets from imported HTML) whenever the host had no network namespace: Windows, and default Docker. A test saw 19 outbound requests. Impact: tracking beacons and probes of local services by a hostile document | High on Windows/Docker | **Fixed.** LibreOffice's HTTP, HTTPS and FTP traffic is forced to a dead local proxy with an empty bypass list. The test now also covers HTTPS and FTP and sees 0 requests; reverting the fix makes it fail again |
 | 2 | Windows workers had **no resource limits** (no `prlimit`) and were killed by `taskkill` only | High for the desktop app | **Fixed.** Job Object: committed-memory and CPU-time caps, at most 16 processes, no desktop/clipboard/system-parameter access, whole-tree termination, created suspended and resumed only once confined, fail-closed |
-| 3 | Windows workers still have **no network isolation** | Medium, inherent | **Open, documented.** Stated in the README, `SECURITY.md` and the security model. Mitigated for LibreOffice by finding 1; FFmpeg, Pandoc and Poppler can still open sockets if exploited |
-| 4 | The project archive `zips/EZConverter.zip` and `*.egg-info` were tracked in git | Low | Untracked and ignored. The archive **remains in git history**; rewriting history is the owner's decision |
-| 5 | Release builds of the Expo app were debug-signed and requested overlay (`SYSTEM_ALERT_WINDOW`), storage and vibrate permissions the app does not need | Medium | **Fixed.** Release-key signing through an environment-driven config plugin and the unneeded permissions blocked. A network security config keeps Android's default of blocking cleartext HTTP and permits it only for loopback (`localhost`, `127.0.0.1`, `10.0.2.2`) so local testing works |
-| 6 | Production Dockerfile shipped `pip 24.0` with 12 known advisories | Low | **Fixed** (pip upgraded in the image) |
-| 7 | Test-suite defects: POSIX path assumptions in desktop tests, a data-dir teardown race on Windows, and a PDF text check broken by `pdftotext` de-hyphenation | n/a | Fixed |
+| 3 | An automated review of the release commit noted the Windows Job Object did not set `JOB_OBJECT_UILIMIT_HANDLES`, so a compromised worker could still send window messages to other applications | Medium | **Fixed** (restriction added; a test shows a message to the shell window is delivered without confinement and blocked with it). Still not done: a separate desktop or window station, and a restricted or low-integrity token. **Not tested:** LibreOffice under the new restriction on Windows, because LibreOffice is not installed on the test machine |
+| 4 | Windows workers still have **no network isolation** | Medium, inherent | **Open, documented.** Stated in the README, `SECURITY.md` and the security model. Mitigated for LibreOffice by finding 1; FFmpeg, Pandoc and Poppler can still open sockets if exploited |
+| 5 | The project archive `zips/EZConverter.zip` and `*.egg-info` were tracked in git | Low | Untracked and ignored. The archive **is already in the public history** (the repository is public and the first two commits are already on GitHub); I found only project files and `.env.example` in it. Removing it would need a history rewrite and force-push, which is the owner's decision |
+| 6 | Release builds of the Expo app were debug-signed and requested overlay (`SYSTEM_ALERT_WINDOW`), storage and vibrate permissions the app does not need | Medium | **Fixed.** Release-key signing through an environment-driven config plugin and the unneeded permissions blocked. A network security config keeps Android's default of blocking cleartext HTTP and permits it only for loopback (`localhost`, `127.0.0.1`, `10.0.2.2`) so local testing works |
+| 7 | Production Dockerfile shipped `pip 24.0` with 12 known advisories | Low | **Fixed** (pip upgraded in the image) |
+| 8 | Test-suite defects: POSIX path assumptions in desktop tests, a data-dir teardown race on Windows, and a PDF text check broken by `pdftotext` de-hyphenation | n/a | Fixed |
 
 ## Not tested or not covered
 
@@ -65,6 +66,6 @@ Android signing certificate (SHA-256): `9C:80:36:4A:DE:EA:21:77:82:DE:E9:ED:B1:6
 
 1. **Back up** `%USERPROFILE%\.ezconverter-signing\` (keystore and `signing.env`). If the key is lost, installed APKs can never be updated; if it leaks, anyone can publish updates that Android accepts.
 2. **Enable private vulnerability reporting** on the GitHub repository (Settings, Code security) so the link in `SECURITY.md` works.
-3. Decide whether to rewrite git history to drop `zips/EZConverter.zip` (it contains only project files and `.env.example`, no secrets).
-4. Upload the three files with `SHA256SUMS.txt` to a GitHub release marked as a **pre-release**, and paste the APK certificate fingerprint into the release notes.
+3. Decide whether to rewrite git history to drop `zips/EZConverter.zip`. It is already public; it contained only project files and `.env.example`, no secrets, so this is housekeeping rather than an incident.
+4. Re-check that the files you upload still match `SHA256SUMS.txt`, then upload the three files with `SHA256SUMS.txt` to a GitHub release marked as a **pre-release**, and paste the APK certificate fingerprint into the release notes.
 5. Tell Windows users about the SmartScreen prompt (the README does), or buy a code-signing certificate.
