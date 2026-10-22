@@ -1,5 +1,6 @@
 import gzip
 import io
+import stat
 import tarfile
 import threading
 import zipfile
@@ -18,8 +19,8 @@ pytestmark = pytest.mark.security
 REG = default_registry()
 
 
-def run(src: Path, s: str, t: str, tmp_path: Path):
-    entry = REG.get(f"archive.{s}->{t}")
+def run(src: Path, s: str, t: str, tmp_path: Path, cap_id: str | None = None):
+    entry = REG.get(cap_id or f"archive.{s}->{t}")
     out, work = tmp_path / "out", tmp_path / "work"
     out.mkdir()
     work.mkdir()
@@ -248,3 +249,131 @@ def test_malicious_archive_end_to_end_fails_without_output(client, tmp_path):
     )
     assert done["artifact_id"] is None
     assert not list(tmp_path.rglob("evil.sh")) and not Path("/evil.sh").exists()
+
+
+def mk7z(path: Path, entries) -> Path:
+    """Craft a 7z from (name, data, kind) entries without touching the filesystem, so hostile names and
+    symlink members can be built on any OS."""
+    import py7zr
+
+    with py7zr.SevenZipFile(path, "w") as sz:
+        for name, data, kind in entries:
+            sz._writef(io.BytesIO(data), name)  # private: the public writers refuse unsafe names
+            if kind == "symlink":  # unix-extension bit | ARCHIVE | REPARSE_POINT | S_IFLNK + mode
+                attrs = 0x8000 | 0x20 | 0x400 | ((stat.S_IFLNK | 0o777) << 16)
+                sz.header.files_info.files[-1]["attributes"] = attrs
+    return path
+
+
+def test_7z_symlink_members_are_skipped_not_extracted(tmp_path):
+    pytest.importorskip("py7zr")
+    src = mk7z(
+        tmp_path / "sym.7z",
+        [("fine.txt", b"ok", "file"), ("a", b"/etc", "symlink"), ("a/x", b"pwn", "file")],
+    )
+    res, _ = run(src, "7z", "zip", tmp_path)
+    assert any("skipped" in w for w in res.warnings)
+    with zipfile.ZipFile(res.output_path) as z:
+        assert sorted(z.namelist()) == ["a/x", "fine.txt"] and z.read("a/x") == b"pwn"
+    assert not [p for p in (tmp_path / "work").rglob("*") if p.is_symlink()]
+    # the source listing and the repacked output must agree, or the members_match check would fail
+    assert A._listing("7z", str(src), tmp_path) == A._listing("zip", str(res.output_path), tmp_path)
+
+
+def test_7z_duplicate_names_first_one_wins_like_zip(tmp_path):
+    pytest.importorskip("py7zr")
+    src = mk7z(
+        tmp_path / "dup.7z",
+        [("a.txt", b"first", "file"), ("a.txt", b"second one", "file"), ("b.txt", b"b", "file")],
+    )
+    res, _ = run(src, "7z", "tar", tmp_path)
+    with tarfile.open(res.output_path) as t:
+        assert sorted(t.getnames()) == ["a.txt", "b.txt"] and t.extractfile("a.txt").read() == b"first"
+    assert A._listing("7z", str(src), tmp_path) == A._listing("tar", str(res.output_path), tmp_path)
+
+
+def test_7z_names_that_collide_with_py7zr_duplicate_renaming_are_refused(tmp_path):
+    pytest.importorskip("py7zr")
+    # py7zr stores the repeated "a.txt" as "a.txt_0", which would silently replace the real "a.txt_0"
+    src = mk7z(
+        tmp_path / "clash.7z",
+        [("a.txt", b"first", "file"), ("a.txt_0", b"the real one", "file"), ("a.txt", b"second", "file")],
+    )
+    with pytest.raises(EZError) as e:
+        run(src, "7z", "zip", tmp_path)
+    assert e.value.code is ErrorCode.UNSAFE_INPUT
+
+
+@pytest.mark.parametrize("name", ["../evil.txt", "/abs/evil", "a/../../evil"])
+def test_7z_with_unsafe_member_names_is_refused(tmp_path, name):
+    pytest.importorskip("py7zr")
+    src = mk7z(tmp_path / "evil.7z", [("fine.txt", b"ok", "file"), (name, b"pwn", "file")])
+    with pytest.raises(EZError) as e:
+        run(src, "7z", "zip", tmp_path)
+    assert e.value.code is ErrorCode.UNSAFE_INPUT
+    assert not (tmp_path / "evil.txt").exists()
+
+
+def test_7z_roundtrip_keeps_content_and_empty_files(tmp_path):
+    pytest.importorskip("py7zr")
+    src = mkzip(tmp_path / "in.zip", {"d/one.txt": b"1" * 100, "empty.txt": b"", "two.bin": b"\x00\x01"})
+    res, _ = run(src, "zip", "7z", tmp_path)
+    work = tmp_path / "back"
+    work.mkdir()
+    back, _ = run(Path(res.output_path), "7z", "zip", work)
+    with zipfile.ZipFile(back.output_path) as z:
+        assert {n: z.read(n) for n in z.namelist() if not n.endswith("/")} == {
+            "d/one.txt": b"1" * 100,
+            "empty.txt": b"",
+            "two.bin": b"\x00\x01",
+        }
+
+
+def _gz_with_bad_body() -> bytes:
+    # valid gzip header followed by a deflate stream that starts with the reserved block type 3
+    return bytes.fromhex("1f8b08000000000000ff") + bytes([0xFF]) * 64
+
+
+def _damaged_gz_variants() -> dict[str, bytes]:
+    good = gzip.compress(b"hello world, " * 4000)
+    crc_bad = bytearray(good)
+    crc_bad[-8] ^= 0xFF  # the stored CRC32 no longer matches the data
+    return {"truncated": good[: len(good) // 2], "bad-crc": bytes(crc_bad), "bad-body": _gz_with_bad_body()}
+
+
+def _damaged_tgz_variants() -> dict[str, bytes]:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+        ti = tarfile.TarInfo("lines.txt")
+        data = "".join(f"line {i} of the file\n" for i in range(40_000)).encode()
+        ti.size = len(data)
+        t.addfile(ti, io.BytesIO(data))
+    good = buf.getvalue()
+    flipped = bytearray(good)
+    for i in range(len(good) // 2, len(good) // 2 + 64):
+        flipped[i] ^= 0xFF  # corrupt the middle of the deflate stream
+    return {
+        "truncated": good[: len(good) // 2],
+        "corrupt-middle": bytes(flipped),
+        "bad-body": _gz_with_bad_body(),
+    }
+
+
+@pytest.mark.parametrize("variant", sorted(_damaged_gz_variants()))
+def test_damaged_gzip_is_malformed_input_and_not_retryable(tmp_path, variant):
+    src = tmp_path / "damaged.gz"
+    src.write_bytes(_damaged_gz_variants()[variant])
+    with pytest.raises(EZError) as e:
+        run(src, "gz", "txt", tmp_path, cap_id="gzip.gz->txt")
+    assert e.value.code is ErrorCode.MALFORMED_INPUT and not e.value.retryable
+    assert not list((tmp_path / "out").iterdir())  # no partial output left behind
+
+
+@pytest.mark.parametrize("variant", sorted(_damaged_tgz_variants()))
+def test_damaged_tgz_is_malformed_input_and_not_retryable(tmp_path, variant):
+    src = tmp_path / "damaged.tar.gz"
+    src.write_bytes(_damaged_tgz_variants()[variant])
+    with pytest.raises(EZError) as e:
+        run(src, "tgz", "zip", tmp_path)
+    assert e.value.code is ErrorCode.MALFORMED_INPUT and not e.value.retryable
+    assert not list((tmp_path / "out").iterdir())

@@ -73,8 +73,22 @@ _LO_REG = """<?xml version="1.0" encoding="UTF-8"?>
 <item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="FirstRun" oor:op="fuse"><value>false</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Load"><prop oor:name="UpdateDocMode" oor:op="fuse"><value>0</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetProxyType" oor:op="fuse"><value>2</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPProxyName" oor:op="fuse"><value>127.0.0.1</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPProxyPort" oor:op="fuse"><value>9</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPSProxyName" oor:op="fuse"><value>127.0.0.1</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPSProxyPort" oor:op="fuse"><value>9</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetFTPProxyName" oor:op="fuse"><value>127.0.0.1</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetFTPProxyPort" oor:op="fuse"><value>9</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetNoProxy" oor:op="fuse"><value></value></prop></item>
 </oor:items>
 """
+# Defence in depth for hosts without network namespaces (Windows, default Docker): every outbound HTTP/HTTPS/FTP
+# request LibreOffice makes while importing a document (linked images, stylesheets, OLE links) is sent to a proxy on
+# a closed port, so it fails instead of reaching the internet or the local network. NoProxy is emptied on purpose.
+_NO_NETWORK_ENV = {
+    k: "http://127.0.0.1:9" for k in ("http_proxy", "https_proxy", "ftp_proxy", "HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY")
+} | {"no_proxy": "", "NO_PROXY": ""}
 
 
 def _pairs() -> list[tuple[str, str, str]]:
@@ -90,6 +104,11 @@ def _pairs() -> list[tuple[str, str, str]]:
         out.append(("csv", t, "pdf" if t == "pdf" else "doc"))
     out += [("svg", "png", "raster"), ("svg", "pdf", "pdf")]
     return out
+
+
+def _user_installation_arg(profile: Path) -> str:
+    """The -env:UserInstallation argument; a proper file URI (file:///C:/... on Windows, file:///... on POSIX)."""
+    return f"-env:UserInstallation={profile.absolute().as_uri()}"
 
 
 @lru_cache(maxsize=1)
@@ -185,7 +204,7 @@ class LibreOfficeEngine(EngineAdapter):
         export = PDF_FILTER[s] if t == "pdf" else LO_FILTER[t]
         argv = [
             soffice,
-            f"-env:UserInstallation=file://{profile}",
+            _user_installation_arg(profile),
             "--headless",
             "--norestore",
             "--nologo",
@@ -197,7 +216,7 @@ class LibreOfficeEngine(EngineAdapter):
             argv.append(f"--infilter={IN_FILTER[s]}")
         argv += ["--convert-to", export, "--outdir", str(outdir), str(src)]
         ctx.progress(None, "converting")
-        r = run_process(argv, workdir=work, limits=ctx.limits, cancel=ctx.cancel, sandboxed=False)
+        r = run_process(argv, workdir=work, limits=ctx.limits, cancel=ctx.cancel, sandboxed=False, env_extra=_NO_NETWORK_ENV)
         if r.cancelled:
             raise EZError(ErrorCode.CANCELLED, "The conversion was cancelled.")
         if r.timed_out:

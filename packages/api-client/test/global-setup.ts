@@ -32,7 +32,15 @@ export default async function setup(project: TestProject) {
     child!.on("exit", (c) => rej(new Error(`backend exited early (${c})`)));
   });
   project.provide("backendUrl", url);
-  return () => { child?.kill("SIGTERM"); rmSync(dataDir, { recursive: true, force: true }); };
+  return async () => {
+    // Wait for the server to exit before deleting its data dir: Windows refuses to remove files a live process still holds open.
+    if (child && child.exitCode === null) {
+      const exited = new Promise<void>((res) => child!.once("exit", () => res()));
+      child.kill("SIGTERM");
+      await Promise.race([exited, new Promise<void>((res) => setTimeout(res, 5000))]);
+    }
+    rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  };
 }
 
 declare module "vitest" {

@@ -51,7 +51,7 @@ def _lo(src: Path, filt: str, outdir: Path) -> Path:
         _run(
             [
                 "soffice",
-                f"-env:UserInstallation=file://{prof}",
+                f"-env:UserInstallation={prof.absolute().as_uri()}",
                 "--headless",
                 "--nologo",
                 "--norestore",

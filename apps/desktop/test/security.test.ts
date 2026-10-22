@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   IpcValidationError, buildCsp, isAllowedDownloadUrl, isAllowedExternalUrl, isAllowedNavigation, isTrustedSender, parseReadyLine,
   resolveWithin, validateNoPayload, validateOpenExternal,
 } from "../src/security";
 import { resolveSidecarCommand } from "../src/sidecar";
 
-const root = "/opt/app/web";
+const root = resolve("/opt/app/web"); // absolute on every OS (gains a drive letter on Windows)
 
 describe("ezc:// path resolution", () => {
   it("serves files inside the web root and defaults to index.html", () => {
@@ -82,7 +82,7 @@ describe("sidecar handshake and discovery", () => {
     const o = { dataDir: "/d", repoRoot: "/repo" };
     expect(resolveSidecarCommand(o, { EZ_SIDECAR_BIN: "/x/bin" }).cmd).toBe("/x/bin");
     expect(resolveSidecarCommand(o, { EZ_PYTHON: "/py" })).toEqual({ cmd: "/py", args: ["-m", "ezconverter", "serve", "--sidecar", "--port", "0"] });
-    expect(resolveSidecarCommand(o, { CONDA_PREFIX: "/conda/EZ" }).cmd).toBe(process.platform === "win32" ? "/conda/EZ/python.exe" : "/conda/EZ/bin/python");
+    expect(resolveSidecarCommand(o, { CONDA_PREFIX: "/conda/EZ" }).cmd).toBe(process.platform === "win32" ? join("/conda/EZ", "python.exe") : "/conda/EZ/bin/python");
     expect(resolveSidecarCommand(o, {}).cmd).toBe("python");
   });
 });

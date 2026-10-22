@@ -738,7 +738,8 @@ def create_app(settings: Settings | None = None, registry: CapabilityRegistry | 
             if (
                 not art
                 or exp < time.time()
-                or not hmac.compare_digest(sig, _sign(artifact_id, art["owner"], exp))
+                # bytes, not str: compare_digest raises TypeError on non-ASCII str (attacker-controlled here)
+                or not hmac.compare_digest(sig.encode(), _sign(artifact_id, art["owner"], exp).encode())
             ):
                 raise EZError(ErrorCode.NOT_FOUND, "Result not found or the link expired.")
             owner = art["owner"]

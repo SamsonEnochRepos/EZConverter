@@ -188,7 +188,7 @@ class Store:
             if dst.terminal:
                 sets.append("finished_at=?")
                 args.append(now)
-            db.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id=?", (*args, job_id))
+            db.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id=?", (*args, job_id))  # nosec B608 - literal column names, bound values
             db.execute(
                 "INSERT INTO job_events(job_id,ts,from_state,to_state,note) VALUES(?,?,?,?,?)",
                 (job_id, now, src.value, dst.value, note),
@@ -201,7 +201,7 @@ class Store:
             time.time()
         ]
         with self.tx() as db:
-            db.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id=?", (*args, job_id))
+            db.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id=?", (*args, job_id))  # nosec B608 - literal column names, bound values
 
     def queued_jobs(self, limit: int) -> list[dict[str, Any]]:
         return self.q("SELECT * FROM jobs WHERE state='QUEUED' ORDER BY created_at, id LIMIT ?", (limit,))
@@ -225,7 +225,7 @@ class Store:
 
     def jobs_in_states(self, states: list[str]) -> list[dict[str, Any]]:
         ph = ",".join("?" * len(states))
-        return self.q(f"SELECT * FROM jobs WHERE state IN ({ph})", tuple(states))
+        return self.q(f"SELECT * FROM jobs WHERE state IN ({ph})", tuple(states))  # nosec B608 - ph is only "?"
 
     def batch_jobs(self, batch_id: str) -> list[dict[str, Any]]:
         return self.q("SELECT * FROM jobs WHERE batch_id=? ORDER BY created_at, id", (batch_id,))

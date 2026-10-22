@@ -1,6 +1,6 @@
 import type { UploadSource } from "@ezconverter/api-client";
 import { EZApiError } from "@ezconverter/api-client";
-import type { ErrorBody, ExecutionPolicy, FileOut, JobResultOut, TargetOut } from "@ezconverter/contracts";
+import type { BatchOut, ErrorBody, ExecutionPolicy, FileOut, JobResultOut, TargetOut } from "@ezconverter/contracts";
 import { isTerminal } from "@ezconverter/contracts";
 import { type Action, type BatchItem, type BatchRun, type BatchState, initialState, isStartable, reducer } from "./batch";
 import { CapabilityProbe, type RouterSettings, type Runtime, routeConversion } from "./router";
@@ -39,6 +39,7 @@ export class BatchController {
   private polling = new Set<string>();
   private idle: Array<() => void> = [];
   private planTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private starting?: Promise<void>;
 
   constructor(private deps: ControllerDeps) {
     this.state = initialState(deps.settings().defaultPolicy);
@@ -170,7 +171,13 @@ export class BatchController {
     return [...out.values()].sort((a, b) => a.target.localeCompare(b.target));
   }
 
-  setTarget(key: string, target: string | undefined): void { this.dispatch({ type: "set-target", key, target }); if (target) void this.plan(key); }
+  /** Discards any plan request still in flight for this item, so its late answer cannot overwrite newer settings. */
+  private invalidatePlan(key: string): void {
+    const cur = this.planSeq.get(key);
+    if (cur !== undefined && cur < 0) this.planSeq.set(key, -cur);   // no longer in flight as far as settled() is concerned
+  }
+
+  setTarget(key: string, target: string | undefined): void { this.invalidatePlan(key); this.dispatch({ type: "set-target", key, target }); if (target) void this.plan(key); }
   setAllTarget(target: string, keys?: string[]): void {
     this.dispatch({ type: "set-all-target", target, keys });
     for (const i of this.state.items) if (i.target === target && (!keys || keys.includes(i.key))) void this.plan(i.key);
@@ -180,6 +187,7 @@ export class BatchController {
    * Without this, clicking "Convert" within the debounce window would run with the previous settings.
    */
   setOptions(key: string, options: Record<string, unknown>): void {
+    this.invalidatePlan(key);   // a plan request already in flight must not land during the debounce window
     this.dispatch({ type: "set-options", key, options });
     clearTimeout(this.planTimers.get(key));
     this.planTimers.set(key, setTimeout(() => { this.planTimers.delete(key); void this.plan(key).finally(() => this.pulse()); }, this.deps.planDebounceMs ?? 250));
@@ -204,7 +212,7 @@ export class BatchController {
   async plan(key: string): Promise<void> {
     const it = this.item(key);
     if (!it?.file?.format || !it.target) return;
-    const seq = (this.planSeq.get(key) ?? 0) + 1;
+    const seq = Math.abs(this.planSeq.get(key) ?? 0) + 1;   // abs: an earlier request may still be marked in flight (negative)
     this.planSeq.set(key, -seq);              // negative = in flight (see settled())
     this.dispatch({ type: "planning", key });
     const stale = () => this.planSeq.get(key) !== -seq;
@@ -235,7 +243,15 @@ export class BatchController {
 
   // ------------------------------------------------------------------ running
 
-  async start(): Promise<void> {
+  /** Concurrent calls (a double click before 'run-started') share one submission instead of converting every file twice. */
+  start(): Promise<void> {
+    if (this.starting) return this.starting;
+    const p = this.submit().finally(() => { if (this.starting === p) this.starting = undefined; });
+    this.starting = p;
+    return p;
+  }
+
+  private async submit(): Promise<void> {
     const items = this.state.items.filter(isStartable);
     if (!items.length) return;
     const groups = new Map<string, BatchItem[]>();
@@ -257,18 +273,24 @@ export class BatchController {
         entries.push({ item: it, fileId: fid });
       }
       if (!entries.length) continue;
-      const batch = await rt.client.createBatch({
-        items: entries.map(({ item, fileId }) => ({ file_id: fileId, target: item.target!, options: item.options, execution_policy: rt.config.location === "local" ? "LOCAL_ONLY" : "REMOTE_ALLOWED" })),
-        execution_policy: rt.config.location === "local" ? "LOCAL_ONLY" : "REMOTE_ALLOWED",
-      }, `${this.key()}-${runtimeId}`);
+      let batch: BatchOut;
+      try {
+        batch = await rt.client.createBatch({
+          items: entries.map(({ item, fileId }) => ({ file_id: fileId, target: item.target!, options: item.options, execution_policy: rt.config.location === "local" ? "LOCAL_ONLY" : "REMOTE_ALLOWED" })),
+          execution_policy: rt.config.location === "local" ? "LOCAL_ONLY" : "REMOTE_ALLOWED",
+        }, `${this.key()}-${runtimeId}`);
+      } catch (e) {   // report this group's items and carry on: earlier groups already run and must still be persisted and polled
+        for (const { item } of entries) this.dispatch({ type: "planned", key: item.key, error: toBody(e), route: { runtimeId, usesRemote: rt.config.location === "remote", note: "" } });
+        continue;
+      }
       const jobKeys: Record<string, string> = {};
       for (const j of batch.jobs) { const e = entries.find((x) => x.fileId === j.file_id); if (e) jobKeys[j.id] = e.item.key; }
       const run: BatchRun = { runtimeId, batchId: batch.id, usesRemote: rt.config.location === "remote", jobKeys, done: false };
       runs.push(run);
       this.dispatch({ type: "run-started", run, jobs: batch.jobs });
     }
-    await this.persistRuns(this.state.runs);
-    for (const r of runs) void this.pollRun(r);
+    try { await this.persistRuns(this.state.runs); }
+    finally { for (const r of runs) void this.pollRun(r); }   // polling must start even if persisting fails
   }
 
   private async pollRun(run: BatchRun): Promise<void> {

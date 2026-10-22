@@ -118,3 +118,22 @@ def test_network_isolation_modes_fail_closed_or_warn(tmp_path, monkeypatch, capl
     monkeypatch.setattr("ezconverter.sandbox.network_isolation_available", lambda: True)
     base.network_isolation = "require"
     assert isolation_state(base) == "active"
+
+
+def test_posix_worker_path_exposes_only_resolved_tool_dirs(tmp_path, monkeypatch):
+    # conda/Homebrew keep ffmpeg & co. outside /usr/bin; the scrubbed worker PATH must still reach them.
+    tools = {
+        "ffmpeg": "/opt/conda/envs/EZ/bin/ffmpeg",
+        "ffprobe": "/opt/conda/envs/EZ/bin/ffprobe",
+        "pandoc": "/opt/homebrew/bin/pandoc",
+        "pdftoppm": "/usr/bin/pdftoppm",  # already a fixed system dir: must not be duplicated
+    }
+    monkeypatch.setattr("ezconverter.sandbox.sys.platform", "linux")
+    monkeypatch.setattr("ezconverter.sandbox.shutil.which", lambda name: tools.get(name))
+    monkeypatch.setenv("PATH", "/home/attacker/bin:/somewhere/else")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "leak")
+    from ezconverter.sandbox import scrubbed_env
+
+    env = scrubbed_env(tmp_path)
+    assert env["PATH"] == "/usr/local/bin:/usr/bin:/bin:/opt/conda/envs/EZ/bin:/opt/homebrew/bin"
+    assert set(env) == {"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL"}

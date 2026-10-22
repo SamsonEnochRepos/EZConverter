@@ -7,7 +7,8 @@ name = "ezconverter"
 version = "0.1.0"
 description = "EZConverter conversion core and API"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = { text = "Apache-2.0" }
+authors = [{ name = "SamsonEnochRepos" }]
 dependencies = [
   "fastapi>=0.115,<1",
   "uvicorn>=0.30,<1",

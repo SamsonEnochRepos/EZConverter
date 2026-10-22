@@ -57,7 +57,10 @@ def run_worker(
         elif on_event:
             on_event(ev)
 
-    argv = [sys.executable, "-I", "-m", "ezconverter.workers.entry", str(req_file)]
+    if getattr(sys, "frozen", False):  # packaged build: the executable itself serves the `worker` command
+        argv = [sys.executable, "worker", str(req_file)]
+    else:
+        argv = [sys.executable, "-I", "-m", "ezconverter.workers.entry", str(req_file)]
     r = run_process(
         argv,
         workdir=workdir,

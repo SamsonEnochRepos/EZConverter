@@ -7,9 +7,15 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "scheme": "ezconverter",
+    "icon": "./assets/icon.png",
     "ios": { "bundleIdentifier": "app.ezconverter.mobile", "supportsTablet": true, "infoPlist": { "ITSAppUsesNonExemptEncryption": false } },
-    "android": { "package": "app.ezconverter.mobile", "allowBackup": false },
-    "web": { "bundler": "metro", "output": "single" },
-    "plugins": ["expo-secure-store", "expo-sharing"]
+    "android": {
+      "package": "app.ezconverter.mobile",
+      "allowBackup": false,
+      "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#0B57E6" },
+      "blockedPermissions": ["android.permission.SYSTEM_ALERT_WINDOW", "android.permission.VIBRATE", "android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"]
+    },
+    "web": { "bundler": "metro", "output": "single", "favicon": "./assets/favicon.png" },
+    "plugins": ["expo-secure-store", "expo-sharing", "./plugins/with-release-hardening"]
   }
 }

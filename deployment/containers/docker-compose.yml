@@ -1,4 +1,4 @@
-# Draft, unverified (no Docker daemon in the authoring session). Terminate TLS in front of this service (Caddy/nginx/cloud LB).
+# Not run by the release audit (the Dockerfile itself was). Terminate TLS in front of this service (Caddy/nginx/cloud LB).
 services:
   converter:
     build: { context: ../.., dockerfile: deployment/containers/Dockerfile }

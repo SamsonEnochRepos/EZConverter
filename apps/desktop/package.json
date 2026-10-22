@@ -1,9 +1,10 @@
 {
   "name": "@ezconverter/desktop",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "private": true,
   "description": "EZConverter desktop shell (Electron) around the shared web UI and a local Python converter sidecar.",
-  "author": "EZConverter",
+  "author": "SamsonEnochRepos",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

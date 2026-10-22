@@ -1,0 +1,26 @@
+{
+  "ffmpeg": {
+    "version": "9.0.2 (gyan.dev essentials build)",
+    "file": "ffmpeg-9.0.2-essentials_build.zip",
+    "url": "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip",
+    "sha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+    "license": "GPL-3.0-or-later (build enables libx264/libx265)",
+    "source": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz and https://www.gyan.dev/ffmpeg/builds/ (build scripts and library sources)"
+  },
+  "pandoc": {
+    "version": "3.12.1",
+    "file": "pandoc-3.12.1-windows-x86_64.zip",
+    "url": "https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-windows-x86_64.zip",
+    "sha256": "6ef431cb20b2c24a0371fc19200dc49d452be54b1b5c9239f3462841ef53e587",
+    "license": "GPL-2.0-or-later",
+    "source": "https://github.com/jgm/pandoc/tree/3.12.1"
+  },
+  "poppler": {
+    "version": "26.09.0-0 (oschwartz10612/poppler-windows build)",
+    "file": "Release-26.09.0-0.zip",
+    "url": "https://github.com/oschwartz10612/poppler-windows/releases/download/v26.09.0-0/Release-26.09.0-0.zip",
+    "sha256": "7a6f256a0ddf7536182246a5733331bf4677cbcc34f4663774947ad34556c8d0",
+    "license": "GPL-2.0-or-later (Poppler) with bundled third-party libraries under their own licenses",
+    "source": "https://gitlab.freedesktop.org/poppler/poppler and https://github.com/oschwartz10612/poppler-windows"
+  }
+}

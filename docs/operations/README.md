@@ -42,7 +42,16 @@ See [deployment/observability/README.md](../../deployment/observability/README.m
 1. Upgrade FFmpeg/LibreOffice/etc.; 2. `rm -rf tests/.conformance-results && pytest tests/conformance -n 4 && python scripts/build_format_matrix.py`; 3. ship the regenerated
 `backend/ezconverter/registry/verified_capabilities.json`. A capability whose conformance case fails is not written to the manifest and therefore stops being advertised.
 
-## Desktop packaging (not done)
+## Desktop packaging (Windows)
 
-`apps/desktop/electron-builder.yml` expects a bundled converter sidecar in `sidecar/` (a PyInstaller or equivalent build of `backend/` **plus** FFmpeg, LibreOffice, Pandoc and Poppler).
-That bundle, code signing, notarisation and licensing sign-off (GPL FFmpeg/Pandoc/Poppler, LGPL py7zr) are open release blockers — see [STATUS](../STATUS.md).
+```powershell
+python scripts/fetch_windows_engines.py      # FFmpeg, Pandoc, Poppler -> apps/desktop/engines (SHA-256 pinned in scripts/engines.lock.json)
+python scripts/build_sidecar.py              # PyInstaller one-folder build of backend/ -> apps/desktop/sidecar
+python scripts/smoke_packaged.py apps/desktop/sidecar/ezconverter-server.exe --engines apps/desktop/engines
+pnpm --filter @ezconverter/web build; pnpm --filter @ezconverter/desktop build
+cd apps/desktop; pnpm exec electron-builder --win     # release/EZConverter-Setup-<v>-win-x64.exe + portable zip
+```
+
+Run `python` from an environment with `pyinstaller` and `backend[sevenzip]` installed. The converter executable also serves as its own worker (`ezconverter-server.exe worker <request.json>`),
+and the app points it at the bundled engines through `EZ_ENGINE_DIR`. LibreOffice is not bundled: it is found in `Program Files\LibreOffice` when installed. Code signing is not configured.
+Release checklist: [docs/security/RELEASE_AUDIT.md](../security/RELEASE_AUDIT.md).

@@ -85,6 +85,24 @@ def test_users_cannot_touch_each_others_data(client, bob, fx):
     assert type(client)(client.app).get(link.replace(art, other["artifact_id"])).status_code == 404
 
 
+def test_non_ascii_signature_or_token_is_rejected_cleanly_not_a_500(client, fx):
+    art = convert(client, fx("json"), "yaml")["artifact_id"]
+    anon = type(client)(client.app, raise_server_exceptions=False)
+    exp = int(time.time()) + 300
+    # compare_digest raises TypeError on non-ASCII str: that must be a plain 404, not an internal_error
+    for sig in ("%C3%A9", "%C3%A9" * 32, "%E2%82%AC", "%F0%9F%94%91"):
+        r = anon.get(f"/v1/artifacts/{art}/download?exp={exp}&sig={sig}")
+        assert r.status_code == 404, (sig, r.status_code, r.text)
+        assert r.json()["error"]["code"] == "not_found"
+    # the same goes for a non-ASCII bearer token (header bytes are decoded as latin-1)
+    r = anon.get("/v1/jobs", headers={"Authorization": "Bearer t\xe9k".encode("latin-1")})
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "unauthenticated"
+    # valid signatures are unaffected
+    link = client.post(f"/v1/artifacts/{art}/link").json()["url"]
+    assert anon.get(link).status_code == 200
+
+
 # ------------------------------------------------------------------ execution policy (hybrid local / remote)
 
 
@@ -379,7 +397,8 @@ def test_libreoffice_does_not_fetch_remote_resources_or_run_macros(client, tmp_p
     threading.Thread(target=loop, daemon=True).start()
     html = tmp_path / "beacon.html"
     html.write_text(
-        f'<html><body><p>hello</p><img src="http://127.0.0.1:{port}/track.png"><link rel="stylesheet" href="http://127.0.0.1:{port}/a.css"></body></html>'
+        f'<html><body><p>hello</p><img src="http://127.0.0.1:{port}/track.png"><link rel="stylesheet" href="http://127.0.0.1:{port}/a.css">'
+        f'<img src="https://127.0.0.1:{port}/secure.png"><img src="ftp://127.0.0.1:{port}/f.png"></body></html>'
     )
     try:
         done = convert(client, html, "pdf")

@@ -1,9 +1,6 @@
 # Implementation status
 
-_Generated at the end of the first engineering pass. Numbers below come from the last full `scripts/verify.sh` run on the authoring machine (Linux, Python 3.13, Node 22)._
-
-> **Repository state:** all work is committed on branch `claude/ezconverter-platform-arch-nugsvz` in the authoring container. **Pushing to GitHub failed with HTTP 403** (the Claude GitHub App
-> is not authorised on `SamsonEnochRepos/EV-AI`). Connect/reconnect GitHub at https://claude.ai/connect-github and install the app on the repository, then push (or ask for the push to be repeated).
+_First engineering pass, updated for the 0.1.0 pre-release (2026-10-22). Detailed pre-release evidence, including what was **not** tested, is in [security/RELEASE_AUDIT.md](security/RELEASE_AUDIT.md)._
 
 ## Summary
 
@@ -13,8 +10,8 @@ _Generated at the end of the first engineering pass. Numbers below come from the
 | API (22 paths, OpenAPI, idempotency, auth, rate limits, signed downloads) | Implemented and tested |
 | Orchestration (durable queue, bounded concurrency, cancel, retry, recovery, batches + ZIP/manifest, retention) | Implemented and tested |
 | Web app (home, workspace, batch, results, history, settings) | Implemented; Chromium e2e on real backend |
-| Desktop (Electron) | Implemented; real-Electron e2e on **Linux only**; not packaged |
-| Mobile (Expo/React Native) | Implemented; bundles for iOS+Android compile; **never run on a device/emulator** |
+| Desktop (Electron) | Implemented; Windows installer + portable zip built (unsigned); packaged converter smoke-tested; one packaged-app e2e run converted files successfully but its "quitting stops the converter" test timed out (unresolved), and the final installer was not re-run through it |
+| Mobile (Expo/React Native) | Implemented; signed Android release APK built and run end to end on an Android 17 **emulator** (not a physical device); iOS not built |
 | Hybrid local/remote policy | Implemented in server, router and controller; tested incl. remote-location server |
 | Hardening / docs / licensing inventory | Done; see blockers below |
 
@@ -50,11 +47,11 @@ Linux x86-64 only: backend + engines, Chromium (web and mobile-preview), Electro
 
 | Area | State |
 |---|---|
-| Windows and macOS desktop builds / runs | **Not run.** The Electron app was exercised only on Linux (Xvfb). Sandbox primitives (`prlimit`, `unshare`) are Linux-only. |
-| Packaged desktop installers, code signing, notarisation, auto-update, Electron fuses | Configuration written (`electron-builder.yml`); **never built**. The converter sidecar bundle does not exist yet. |
-| iOS / Android on a device or emulator | **Not run.** Verified: TypeScript, Hermes bundles for both platforms compile, platform-adapter unit tests (mocked native modules), and the same React Native UI running in Chromium via react-native-web against a real remote-location backend. Real file-provider URIs, `XMLHttpRequest` file-URI streaming, `expo-file-system` downloads, share sheets, keychain and app suspension/resume are **untested**. |
-| Container image / compose / Kubernetes | Dockerfile and compose are **drafts, never built** (no Docker daemon). |
-| GitHub Actions workflow | Written, **never executed**. `scripts/verify.sh` is its executed equivalent. |
+| Windows desktop | Built and checked headlessly (fuses, asar, bundled converter and engines). Workers get a Job Object but **no network isolation**. macOS: **not built or run**. |
+| Desktop installers | Windows NSIS installer and portable zip built; fuses read back from the binary. Code signing, notarisation (macOS) and auto-update: **not done**. |
+| iOS / Android | Android: release APK signed, installed and used on an emulator against the production container (connect, pick, convert, verified result). Physical devices and iOS: **not run.** Previously: Verified: TypeScript, Hermes bundles for both platforms compile, platform-adapter unit tests (mocked native modules), and the same React Native UI running in Chromium via react-native-web against a real remote-location backend. Real file-provider URIs, `XMLHttpRequest` file-URI streaming, `expo-file-system` downloads, share sheets, keychain and app suspension/resume are **untested**. |
+| Container image | Dockerfile built and run with a read-only root, dropped capabilities and no-new-privileges: health, auth, Pandoc and LibreOffice conversions work. The compose file and Kubernetes manifests were **not** run. |
+| GitHub Actions workflow | Written, **never executed** on GitHub. `scripts/verify.sh` and the Docker-based run in the release audit are its executed equivalents. |
 | PostgreSQL, a distributed queue, object storage | **Not implemented.** Single-node SQLite + local filesystem behind `Store` / `LocalArtifactStore`. |
 | Metrics/tracing exporters | **Not implemented** (structured logs, request ids and the job audit table only). |
 | In-browser (WASM) local conversion | **Not implemented.** The web app uses a local or remote converter over HTTP. |
@@ -93,8 +90,8 @@ between Node and Chromium (desktop sender check).
 ## Unresolved risks and release blockers
 
 1. **Licensing/redistribution sign-off** for the bundled engine set (GPL FFmpeg/Pandoc/Poppler, LGPL py7zr, LibreOffice fonts) before any packaged desktop/mobile/container distribution.
-2. **Desktop sidecar packaging** (bundling Python + engines per OS) and cross-OS sandboxing: workers are Linux-sandboxed only.
-3. **Mobile device validation** (file providers, large uploads over cellular, suspension, share/export on both OSes).
+2. **macOS packaging and cross-OS sandboxing**: Windows workers have resource limits but no network isolation; macOS has neither.
+3. **Mobile device validation** on physical Android devices and on iOS (file providers, large uploads over cellular, suspension, share/export).
 4. **Multi-node scale-out**: SQLite/local-disk queue is single-node; PostgreSQL + object storage + a real queue are needed for horizontal scaling and HA.
 5. **Auth** is static tokens; no accounts, SSO, rotation or scopes. TLS/at-rest encryption are deployment responsibilities.
 6. **Stronger isolation for a public service** (gVisor/Firecracker/containers with egress denied, cgroup quotas, malware scanning).
@@ -103,7 +100,7 @@ between Node and Chromium (desktop sender check).
 
 ## Next implementation tasks
 
-1. Push the branch / open the PR once GitHub access is fixed (see top of this file).
+1. Windows and macOS: code signing and notarisation, auto-update, network isolation for workers (for example an AppContainer or firewall rule).
 2. PostgreSQL `Store` + object-storage `ArtifactStore`, queue worker separation, metrics.
 3. Package the sidecar (PyInstaller + engines) and build/sign desktop installers on Windows/macOS/Linux CI; add Windows/macOS job sandboxing (Job Objects / `sandbox-exec`/App Sandbox).
 4. Device-test the mobile app (Maestro/Detox), then iOS/Android builds with EAS.

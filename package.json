@@ -2,6 +2,8 @@
   "name": "ezconverter",
   "private": true,
   "version": "0.1.0",
+  "license": "Apache-2.0",
+  "author": "SamsonEnochRepos",
   "description": "EZConverter monorepo: web, desktop (Electron) and mobile (Expo) clients over a shared contract.",
   "packageManager": "pnpm@10.28.0",
   "engines": { "node": ">=22.12" },

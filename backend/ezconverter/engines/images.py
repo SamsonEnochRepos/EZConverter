@@ -40,6 +40,7 @@ ANIMATED_FORMATS = {"gif", "webp", "png", "avif"}  # APNG via PNG plugin
 LOSSY_TARGETS = {"jpeg", "gif", "ico"}
 QUALITY_TARGETS = {"jpeg", "webp", "avif"}
 MAX_PIXELS = 89_000_000
+_EXIF_ORIENTATION = 0x0112
 _LICENSE = LicenseInfo(
     "Pillow", "HPND", "Permissive; bundled codec libraries carry their own permissive licenses."
 )
@@ -188,8 +189,10 @@ class PillowEngine(EngineAdapter):
                 with Image.open(ctx.input.path) as im:
                     frames = self._load_frames(im, t, opts, warns)
                     icc = im.info.get("icc_profile") if opts["keep_metadata"] else None
+                    # Frame 0 of a single-frame image was physically rotated by exif_transpose, so the
+                    # copied EXIF must not ask viewers to rotate it a second time.
                     exif = (
-                        self._exif(im)
+                        self._exif(im, transposed=getattr(im, "n_frames", 1) == 1)
                         if opts["keep_metadata"] and t in ("jpeg", "webp", "png", "tiff", "avif")
                         else None
                     )
@@ -239,9 +242,11 @@ class PillowEngine(EngineAdapter):
     # ------------------------------------------------------------------ helpers
 
     @staticmethod
-    def _exif(im: Image.Image) -> bytes | None:
+    def _exif(im: Image.Image, transposed: bool = False) -> bytes | None:
         try:
             ex = im.getexif()
+            if transposed and ex.get(_EXIF_ORIENTATION, 1) != 1:
+                ex[_EXIF_ORIENTATION] = 1
             return ex.tobytes() if ex else None
         except Exception:
             return None

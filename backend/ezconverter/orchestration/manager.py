@@ -114,6 +114,7 @@ class JobManager:
         self._stop = threading.Event()
         self._running: dict[str, int] = {}  # job id -> estimated memory MB
         self._cancel: dict[str, threading.Event] = {}
+        self._cancel_lock = threading.Lock()  # guards _cancel: written by runner threads, read by API/stop
         self._threads: list[threading.Thread] = []
         self._idem_lock = threading.Lock()
         self.mem_budget_mb = _mem_budget_mb()
@@ -129,9 +130,13 @@ class JobManager:
 
     def stop(self) -> None:
         self._stop.set()
+        # Kill the workers, but this is a shutdown, not a user cancellation: _finish_error re-queues the
+        # interrupted jobs (see there) instead of recording them as CANCELLED.
+        with self._cancel_lock:
+            events = list(self._cancel.values())
+        for ev in events:
+            ev.set()
         with self._cv:
-            for ev in self._cancel.values():
-                ev.set()
             self._cv.notify_all()
         for t in self._threads:
             t.join(timeout=5)
@@ -343,7 +348,8 @@ class JobManager:
             return self.store.get_job(job_id)  # type: ignore[return-value]
         # running: flag it and kill the worker; the runner thread performs the transition
         self.store.update_job(job_id, cancel_requested=1)
-        ev = self._cancel.get(job_id)
+        with self._cancel_lock:
+            ev = self._cancel.get(job_id)
         if ev:
             ev.set()
         return self.store.get_job(job_id)  # type: ignore[return-value]
@@ -646,8 +652,13 @@ class JobManager:
     def _run_job(self, job: dict[str, Any]) -> None:
         jid = job["id"]
         cancel = threading.Event()
-        self._cancel[jid] = cancel
-        if job["cancel_requested"]:
+        with self._cancel_lock:
+            self._cancel[jid] = cancel
+        # Registered first, checked second: a cancel_job() that wrote the flag after this read is
+        # guaranteed to find the event, and one that wrote it before is seen here (the claim snapshot is
+        # stale). Likewise a stop() whose snapshot of the events missed this job has already set _stop.
+        cur = self.store.get_job(jid)
+        if (cur or job)["cancel_requested"] or self._stop.is_set():
             cancel.set()
         attempt_dir = self.storage.job_dir(jid, job["attempts"])
         try:
@@ -719,7 +730,8 @@ class JobManager:
             )
         finally:
             self.storage.remove_tree(attempt_dir)
-            self._cancel.pop(jid, None)
+            with self._cancel_lock:
+                self._cancel.pop(jid, None)
             with self._cv:
                 self._running.pop(jid, None)
                 self._cv.notify_all()
@@ -799,6 +811,19 @@ class JobManager:
         jid = job["id"]
         cur = self.store.get_job(jid)
         if cur is None or JobState(cur["state"]).terminal:
+            return
+        if exc.code is ErrorCode.CANCELLED and self._stop.is_set() and not cur["cancel_requested"]:
+            # Killed by shutdown, not by the user: hand the job back to the queue so the next start runs
+            # it. The interrupted attempt is refunded; it was not the job's fault.
+            self.store.transition(
+                jid,
+                JobState.QUEUED,
+                note="re-queued on shutdown",
+                expect={JobState.RUNNING, JobState.VERIFYING},
+                attempts=max(cur["attempts"] - 1, 0),
+                progress=None,
+                phase=None,
+            )
             return
         if exc.code is ErrorCode.CANCELLED or cur["cancel_requested"]:
             self.store.transition(

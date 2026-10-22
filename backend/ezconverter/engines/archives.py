@@ -1,7 +1,7 @@
 """Archive repacking: ZIP, TAR, TAR.GZ, 7z and single-file gzip.
 
-Members are streamed from the source archive into the target archive; nothing is extracted to a
-path derived from archive contents, so path traversal cannot write outside the sandbox. Names,
+Members are streamed from the source archive into the target archive (7z members are spooled to
+index-named files first); nothing is extracted to a path derived from archive contents, so path traversal cannot write outside the sandbox. Names,
 member types, counts, sizes and compression ratios are validated first.
 """
 
@@ -12,7 +12,9 @@ import io
 import os
 import shutil
 import tarfile
+import threading
 import zipfile
+import zlib
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -91,6 +93,81 @@ class _Budget:
             )
 
 
+class _Spool:
+    """Minimal py7zr member writer: keeps the bytes in `path`, or drops them when `path` is None."""
+
+    def __init__(self, path):
+        self.path = path
+        self._fp = open(path, "wb") if path is not None else None
+        self._size = 0
+
+    def write(self, data) -> int:
+        self._size += len(data)
+        if self._fp is not None:
+            self._fp.write(data)
+        return len(data)
+
+    def read(self, size=None) -> bytes:
+        return b""
+
+    def seek(self, offset, whence=0) -> int:
+        return 0
+
+    def seekable(self) -> bool:
+        return False
+
+    def flush(self) -> None:
+        if self._fp is not None:
+            self._fp.flush()
+
+    def size(self) -> int:
+        return self._size
+
+    def close(self) -> None:
+        if self._fp is not None:
+            self._fp.close()
+
+
+class _SevenZipSpool:
+    """py7zr writer factory that keeps only the wanted members, each in a file named by its index."""
+
+    def __init__(self, directory, wanted: dict[str, int]):
+        self.directory = directory
+        self.wanted = wanted  # name py7zr passes to `create` -> entry index
+        self.writers: dict[int, _Spool] = {}
+        self._all: list[_Spool] = []
+        self._lock = threading.Lock()
+
+    def create(self, filename: str) -> _Spool:
+        try:
+            idx = self.wanted.get(safe_member_name(filename))
+        except EZError:
+            idx = None
+        with self._lock:
+            if idx is None or idx in self.writers:
+                w = _Spool(None)  # links, repeated names and anything else we did not ask for
+            else:
+                w = self.writers[idx] = _Spool(self.directory / f"{idx}.bin")
+            self._all.append(w)
+            return w
+
+    def close_all(self) -> None:
+        for w in self._all:
+            w.close()
+
+    def finish(self, idx: int, expected: int):
+        """Path of the spooled member; its length must match the header the budget was checked against."""
+        w = self.writers.get(idx)
+        if w is None:
+            if expected:
+                raise EZError(ErrorCode.MALFORMED_INPUT, "The 7z archive is damaged or unsupported.")
+            w = self.writers[idx] = _Spool(self.directory / f"{idx}.bin")
+            w.close()
+        if w.size() != expected:
+            raise EZError(ErrorCode.MALFORMED_INPUT, "The 7z archive is damaged or unsupported.")
+        return w.path
+
+
 def _iter_members(fmt: str, path: str, work_dir, warns: list[str]) -> Iterator[Member]:
     budget = _Budget(os.path.getsize(path))
     skipped = 0
@@ -126,34 +203,58 @@ def _iter_members(fmt: str, path: str, work_dir, warns: list[str]) -> Iterator[M
     elif fmt == "7z":
         import py7zr
 
-        sz = py7zr.SevenZipFile(path, "r")
-        if sz.needs_password():
-            raise EZError(ErrorCode.UNSUPPORTED_INPUT, "Password-protected 7z archives are not supported.")
-        infos = sz.list()
-        for fi in infos:
-            safe_member_name(fi.filename)
-            budget.add(fi.uncompressed or 0)
-        extract_dir = work_dir / "x7z"
-        extract_dir.mkdir()
-        sz.extract(path=str(extract_dir))
-        for fi in infos:
-            name = safe_member_name(fi.filename)
-            real = extract_dir / name
-            if fi.is_symlink:
-                skipped += 1
-                continue
-            if fi.is_directory:
-                yield Member(
-                    name,
-                    True,
-                    0,
-                    fi.creationtime.timestamp() if fi.creationtime else 0.0,
-                    lambda: io.BytesIO(b""),
+        # Not `extractall`: that trusts member names to build paths on disk, extracts symlinks and renames or
+        # overwrites duplicates. Only wanted regular files are spooled, to files named by index.
+        spool_dir = work_dir / "x7z"
+        spool_dir.mkdir()
+        wanted: dict[int, str] = {}  # file entry index -> name py7zr will hand the writer factory
+        dirs: set[int] = set()
+        claims: dict[str, int] = {}  # name py7zr will hand the writer factory -> number of entries using it
+        names: list[str] = []
+        with open(path, "rb") as fh, py7zr.SevenZipFile(fh, "r") as sz:
+            if sz.needs_password():
+                raise EZError(
+                    ErrorCode.UNSUPPORTED_INPUT, "Password-protected 7z archives are not supported."
                 )
-            else:
-                mt = fi.creationtime.timestamp() if fi.creationtime else 0.0
-                yield Member(name, False, real.stat().st_size, mt, (lambda real=real: open(real, "rb")))
-        sz.close()
+            infos = sz.list()
+            seen: set[str] = set()
+            counts: dict[str, int] = {}
+            for i, fi in enumerate(infos):
+                name = safe_member_name(fi.filename)
+                budget.add(fi.uncompressed or 0)
+                names.append(name)
+                # py7zr calls a repeated name "<name>_<n>" instead of overwriting the first one
+                out = fi.filename if fi.filename not in counts else f"{fi.filename}_{counts[fi.filename]}"
+                counts[fi.filename] = counts.get(fi.filename, -1) + 1
+                key = safe_member_name(out)
+                claims[key] = claims.get(key, 0) + 1
+                if fi.is_symlink or not (fi.is_directory or getattr(fi, "is_file", True)):
+                    skipped += 1
+                    continue
+                if fi.is_directory:
+                    dirs.add(i)
+                if name in seen:  # the first one wins, as for ZIP
+                    continue
+                seen.add(name)
+                if not fi.is_directory:
+                    wanted[i] = key
+            if any(claims[k] > 1 for k in wanted.values()):
+                raise EZError(
+                    ErrorCode.UNSAFE_INPUT, "The archive contains ambiguous duplicate member names."
+                )
+            spool = _SevenZipSpool(spool_dir, {key: i for i, key in wanted.items()})
+            try:
+                if wanted:
+                    sz.extract(path=None, factory=spool)
+            finally:
+                spool.close_all()
+        for i, fi in enumerate(infos):
+            mt = fi.creationtime.timestamp() if fi.creationtime else 0.0
+            if i in wanted:
+                real = spool.finish(i, fi.uncompressed or 0)
+                yield Member(names[i], False, real.stat().st_size, mt, (lambda real=real: open(real, "rb")))
+            elif i in dirs:
+                yield Member(names[i], True, 0, mt, lambda: io.BytesIO(b""))
     if skipped:
         warns.append(f"{skipped} link or special entr{'y was' if skipped == 1 else 'ies were'} skipped.")
 
@@ -327,7 +428,7 @@ class ArchiveEngine(EngineAdapter):
         except EZError:
             out.unlink(missing_ok=True)  # never leave a partial archive behind
             raise
-        except (zipfile.BadZipFile, tarfile.TarError, EOFError, gzip.BadGzipFile) as exc:
+        except (zipfile.BadZipFile, tarfile.TarError, EOFError, gzip.BadGzipFile, zlib.error) as exc:
             out.unlink(missing_ok=True)
             raise EZError(ErrorCode.MALFORMED_INPUT, "The archive is damaged or truncated.") from exc
         except OSError as exc:
@@ -401,6 +502,6 @@ def _listing(fmt: str, path: str, work_dir) -> dict[str, int]:
 
         with py7zr.SevenZipFile(path, "r") as sz:
             for fi in sz.list():
-                if not fi.is_directory and not fi.is_symlink:
+                if not fi.is_directory and not fi.is_symlink and getattr(fi, "is_file", True):
                     out.setdefault(safe_member_name(fi.filename), fi.uncompressed or 0)
     return out

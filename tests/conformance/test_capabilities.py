@@ -227,7 +227,9 @@ def independent(cap, out: Path, src: Path, tmp_path: Path) -> None:  # noqa: C90
         pages = int(re.search(r"Pages:\s+(\d+)", sh("pdfinfo", str(out))).group(1))
         assert pages >= 1
         if s in TEXT_SOURCES:
-            assert SENTINEL in sh("pdftotext", str(out), "-")
+            # -raw keeps line-end hyphens (the default mode de-hyphenates, so a wrap right after "-" would hide it);
+            # whitespace is dropped because the layout engine may wrap the sentinel across lines.
+            assert "".join(SENTINEL.split()) in "".join(sh("pdftotext", "-raw", str(out), "-").split())
     elif t in ("docx", "odt", "rtf", "html", "md"):
         fmt = {"md": "gfm"}.get(t, t)
         assert SENTINEL in sh("pandoc", "-f", fmt, "-t", "plain", str(out)) if s in TEXT_SOURCES else True

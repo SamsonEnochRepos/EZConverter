@@ -1,4 +1,4 @@
-"""Command line: `python -m ezconverter serve` and `python -m ezconverter openapi`."""
+"""Command line: `python -m ezconverter serve` and `python -m ezconverter openapi` (plus the internal `worker`)."""
 
 from __future__ import annotations
 
@@ -26,6 +26,11 @@ def load_dotenv(path: Path = Path(".env")) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw = sys.argv[1:] if argv is None else argv
+    if raw[:1] == ["worker"]:  # internal: sandboxed worker process of a packaged build (see workers/launcher.py)
+        from .workers.entry import main as worker_main
+
+        return worker_main(["entry", *raw[1:]])
     ap = argparse.ArgumentParser(prog="ezconverter")
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("serve", help="run the API server")

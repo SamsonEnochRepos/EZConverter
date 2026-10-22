@@ -19,6 +19,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 
+from . import winjob
+
 
 @dataclass(frozen=True)
 class Limits:
@@ -79,13 +81,41 @@ def sandbox_prefix(limits: Limits) -> list[str]:
     return prefix
 
 
+_SYSTEM_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
+# External tools the engines resolve with `which`; only their directories are exposed to workers.
+_TOOL_NAMES = ("ffmpeg", "ffprobe", "pandoc", "pdftoppm", "pdfinfo", "soffice")
+
+
+def _tool_dirs() -> list[str]:
+    """Directories (beyond the fixed system ones) holding the engine tools, as resolved by this process.
+
+    A conda env or Homebrew keeps ffmpeg/pandoc/poppler outside /usr/bin; without these the worker would
+    report engines the API advertised as unavailable. Nothing else from the parent's PATH is forwarded.
+    """
+    dirs: list[str] = []
+    for name in _TOOL_NAMES:
+        exe = shutil.which(name)
+        d = os.path.dirname(exe) if exe else ""
+        if not d or d in dirs:
+            continue
+        if sys.platform == "win32" or (d.startswith("/") and d not in _SYSTEM_PATH):
+            dirs.append(d)
+    return dirs
+
+
 def scrubbed_env(workdir: str | os.PathLike[str]) -> dict[str, str]:
     if sys.platform == "win32":
         # Windows has no fixed system bin dirs, and Python/DLL loading needs SYSTEMROOT; keep only what is required.
-        env = {k: os.environ[k] for k in ("PATH", "SYSTEMROOT", "COMSPEC", "PATHEXT") if k in os.environ}
+        env = {k: os.environ[k] for k in ("SYSTEMROOT", "COMSPEC", "PATHEXT") if k in os.environ}
+        if getattr(sys, "frozen", False):
+            # Packaged build: the worker needs only the engines and the Windows system directories.
+            root = os.environ.get("SYSTEMROOT", r"C:\Windows")
+            env["PATH"] = os.pathsep.join([*_tool_dirs(), os.path.join(root, "System32"), root])
+        elif "PATH" in os.environ:  # dev installs (conda) need their DLL directories on PATH
+            env["PATH"] = os.environ["PATH"]
         return {**env, "HOME": str(workdir), "TMPDIR": str(workdir), "TEMP": str(workdir), "TMP": str(workdir)}
     return {
-        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "PATH": ":".join([*_SYSTEM_PATH, *_tool_dirs()]),
         "HOME": str(workdir),
         "TMPDIR": str(workdir),
         "LANG": "C.UTF-8",
@@ -109,6 +139,11 @@ def run_process(
         raise TypeError("argv must be a sequence of arguments, not a string")
     limits = limits or Limits()
     full = [*(sandbox_prefix(limits) if sandboxed else []), *map(str, argv)]
+    popen_kwargs: dict = {"start_new_session": True}
+    use_job = sandboxed and sys.platform == "win32"
+    if sys.platform == "win32":
+        flags = winjob.CREATE_NEW_PROCESS_GROUP | winjob.CREATE_NO_WINDOW
+        popen_kwargs = {"creationflags": flags | (winjob.CREATE_SUSPENDED if use_job else 0)}
     proc = subprocess.Popen(
         full,
         cwd=str(workdir),
@@ -116,8 +151,20 @@ def run_process(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        start_new_session=True,
+        **popen_kwargs,
     )
+    job: winjob.JobHandle | None = None
+    if use_job:
+        # Fail closed: a worker that could not be confined must not run.
+        try:
+            job = winjob.confine(int(proc._handle), memory_mb=limits.memory_mb, cpu_seconds=limits.cpu_seconds)  # type: ignore[attr-defined]
+            winjob.resume(int(proc._handle))  # type: ignore[attr-defined]
+        except BaseException:
+            proc.kill()
+            proc.wait()
+            if job:
+                job.close()
+            raise
     out_chunks: list[str] = []
     out_lines: list[str] = []
     out_size = 0
@@ -161,11 +208,13 @@ def run_process(
         elif time.monotonic() > deadline:
             timed_out = True
         if cancelled or timed_out:
-            _kill_group(proc)
+            _kill_group(proc, job)
             proc.wait()
             break
     for t in threads:
         t.join(timeout=2)
+    if job:
+        job.close()  # KILL_ON_JOB_CLOSE reaps any descendant that outlived the worker
     rc = proc.returncode
     return ProcResult(
         returncode=rc,
@@ -178,9 +227,12 @@ def run_process(
     )
 
 
-def _kill_group(proc: subprocess.Popen) -> None:
-    if sys.platform == "win32":  # no process groups: kill the whole tree
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+def _kill_group(proc: subprocess.Popen, job: winjob.JobHandle | None = None) -> None:
+    if sys.platform == "win32":  # no process groups: terminate the job, else kill the whole tree
+        if job:
+            job.terminate()
+        else:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)  # nosec B607
         return
     try:
         os.killpg(proc.pid, signal.SIGKILL)
@@ -191,5 +243,22 @@ def _kill_group(proc: subprocess.Popen) -> None:
             pass
 
 
+def _windows_search_dirs() -> list[str]:
+    dirs = [d for d in os.environ.get("EZ_ENGINE_DIR", "").split(os.pathsep) if d]
+    for var in ("ProgramFiles", "ProgramFiles(x86)"):
+        base = os.environ.get(var)
+        if base:
+            dirs.append(os.path.join(base, "LibreOffice", "program"))
+    return dirs
+
+
 def which(name: str) -> str | None:
-    return shutil.which(name)
+    """Find an engine executable. On Windows the bundled engines (EZ_ENGINE_DIR) win over PATH, and
+    LibreOffice is also looked up in its default install directories (it is not added to PATH)."""
+    if sys.platform != "win32":
+        return shutil.which(name)
+    bundled = os.environ.get("EZ_ENGINE_DIR", "")
+    hit = shutil.which(name, path=os.pathsep.join(filter(None, [bundled, os.environ.get("PATH", "")])))
+    if hit or name != "soffice":
+        return hit
+    return shutil.which(name, path=os.pathsep.join(_windows_search_dirs()))

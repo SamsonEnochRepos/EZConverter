@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import { APP_ORIGIN, parseReadyLine } from "./security";
 
 export interface SidecarInfo { url: string; token: string; origin: string }
@@ -30,11 +30,18 @@ export class Sidecar {
   async start(): Promise<SidecarInfo> {
     const token = randomBytes(32).toString("base64url");
     const { cmd, args } = resolveSidecarCommand(this.o);
+    // Packaged builds run from the (user-owned) data dir, never from the install directory, so no stray .env is picked up.
+    mkdirSync(this.o.dataDir, { recursive: true });
+    const engineDir = this.o.resourcesPath ? join(this.o.resourcesPath, "engines") : undefined;
+    const bundledEngines = engineDir !== undefined && existsSync(engineDir);
     const child = spawn(cmd, args, {
-      cwd: this.o.repoRoot,
+      cwd: this.o.resourcesPath ? this.o.dataDir : this.o.repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
       env: {   // minimal environment: no inherited secrets
-        PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", LANG: process.env.LANG ?? "C.UTF-8",
+        PATH: bundledEngines ? `${engineDir}${delimiter}${process.env.PATH ?? ""}` : process.env.PATH ?? "",
+        ...(process.env.SYSTEMROOT ? { SYSTEMROOT: process.env.SYSTEMROOT } : {}),
+        ...(bundledEngines ? { EZ_ENGINE_DIR: engineDir } : {}), HOME: process.env.HOME ?? "", LANG: process.env.LANG ?? "C.UTF-8",
         EZ_DATA_DIR: this.o.dataDir, EZ_AUTH_MODE: "token", EZ_API_KEYS: `${token}:desktop`, EZ_LOCATION: "local",
         EZ_ALLOWED_ORIGINS: APP_ORIGIN, EZ_MAX_CONCURRENCY: "2",
         ...(process.env.EZ_EXTRA_ENGINES ? { EZ_EXTRA_ENGINES: process.env.EZ_EXTRA_ENGINES } : {}),
